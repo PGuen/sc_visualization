@@ -9,45 +9,53 @@ sc_signature_enrichment <-
            do.scale=T,pt.size=1, group.cols=NULL,plot.legends=F,
            scales_x_axis=NULL, # numeric vector of lower limit and upper limit for x axis
            scales_gradient=NULL, # numeric vector of lower limit and upper limit for color
-           do.raster=F
+           do.raster=F,
+           seurat.assay=NULL
   ){
     # check some requirements
     packages_to_load=c("RColorBrewer","ggplot2","scales","ggridges","dplyr","ggrastr")
     if(any(!packages_to_load %in% installed.packages())) stop(paste("Please install the",packages_to_load[!packages_to_load %in% installed.packages()]))
-    if(!as.character(class(seurat_object))=="seurat") stop("Please provide an object of class seurat")
+    if(!as.character(class(seurat_object))=="Seurat") stop("Please provide an object of class seurat")
     if(!plot_type %in% c('dim.reduction_plot','box_plot','violin_plot','ridges_plot')) stop("Please use one of the following plot_types: dim.reduction_plot, box_plot, violin_plot ,ridges_plot")
-    if(plot_type == 'dim.reduction_plot' & !reduction_use %in% names(seurat_object@dr)) stop(paste("If dim.reduction_plot is specified,",reduction_use,"has to be computed"))
+    if(plot_type == 'dim.reduction_plot' & !reduction_use %in% names(seurat_object@reductions)) stop(paste("If dim.reduction_plot is specified,",reduction_use,"has to be computed"))
     if(!anno_name %in% c("ident",colnames(seurat_object@meta.data))) stop("anno_name has to be ident or column name of seurat_object@meta.data")
-    if(is.null(cell_ids)) cell_ids <- colnames(seurat_object@data)
+    if(is.null(seurat.assay)) seurat.assay <- DefaultAssay(seurat_object)
+    if(is.null(cell_ids)) cell_ids <- colnames(seurat_object@assays[[seurat.assay]]@data)
     
     # load required packages
     invisible(lapply(packages_to_load, require, character.only = TRUE))  
     
     # fetch raw data
-    count_data <- seurat_object@raw.data[,cell_ids] 
+    count_data <- Matrix::as.matrix(seurat_object@assays[[seurat.assay]]@counts)[,cell_ids] 
+    norm_data <- Matrix::as.matrix(seurat_object@assays[[seurat.assay]]@data)[,cell_ids] 
     
     # remove genes from signatures that are not present in the filtered dataset and report
     size_up = length(signature_upregulated);size_down= length(signature_downregulated)
-    signature_upregulated <- signature_upregulated[signature_upregulated %in% rownames(seurat_object@data)]
-    print(paste("Signature.upregulated:",length(signature_upregulated %in% rownames(seurat_object@data)),"out of", size_up," genes are contained in the dataset"))
-    signature_downregulated <- signature_downregulated[signature_downregulated %in% rownames(seurat_object@data)]
-    print(paste("Signature.downregulated:",length(signature_downregulated %in% rownames(seurat_object@data)),"out of", size_down," genes are contained in the dataset"))
-    
+    signature_upregulated <- signature_upregulated[signature_upregulated %in%
+                                                     rownames(norm_data)]
+    print(paste("Signature.upregulated:",length(signature_upregulated %in% 
+                                                  rownames(norm_data)),"out of", size_up,
+                " genes are contained in the dataset"))
+    signature_downregulated <- signature_downregulated[signature_downregulated %in%
+                                                         rownames(norm_data)]
+    print(paste("Signature.downregulated:",length(signature_downregulated %in%
+                                                    rownames(norm_data)),"out of", size_down,
+                " genes are contained in the dataset"))
     # calculate mean expression for the signature_upregulated
     expr_df = data.frame(
-      mean_upregulated=colMeans(count_data[as.character(signature_upregulated),],na.rm = T),
-      mean_downregulated=colMeans(count_data[as.character(signature_downregulated),],na.rm = T),
+      mean_upregulated=colMeans(count_data[as.character(signature_upregulated),,drop=F],na.rm = T),
+      mean_downregulated=colMeans(count_data[as.character(signature_downregulated),,drop=F],na.rm = T),
       mean_total=colMeans(count_data,na.rm = T)
     ) 
     
     
     if (anno_name == "ident") {
-      expr_df$group=as.character(seurat_object@ident[rownames(expr_df)])
+      expr_df$group=as.character(seurat_object@active.ident[rownames(expr_df)])
     } else if (is.element(anno_nam,colnames(seurat_object@meta.data))) {
-      expr_df$group=as.character(seurat_object@meta.data[["orig.ident"]])
+      expr_df$group=as.character(seurat_object$orig.ident)
     }
-    
-    # calculate fractions
+
+        # calculate fractions
     # since we use the raw data the counts are scaled by total counts
     expr_df$fraction_upregulated <- expr_df$mean_upregulated/expr_df$mean_total*100
     expr_df$fraction_downregulated <- expr_df$mean_downregulated/expr_df$mean_total*100
@@ -101,7 +109,7 @@ sc_signature_enrichment <-
     
     # dim.reduxtion plot 
     if (plot_type == "dim.reduction_plot"){
-      dim.reduction_df = as.data.frame(seurat_object@dr[[reduction_use]]@cell.embeddings[rownames(expr_df),])
+      dim.reduction_df = as.data.frame(seurat_object@reductions[[reduction_use]]@cell.embeddings[rownames(expr_df),])
       axes= colnames(dim.reduction_df)[1:2]
       expr_df= merge(expr_df, dim.reduction_df, by='row.names', all=TRUE) 
       expr_df <- expr_df[order(expr_df$fraction_diff,decreasing = F),]
@@ -133,3 +141,28 @@ sc_signature_enrichment <-
     if (!plot.legends) plot = plot + theme(legend.position = "none")
     return(plot)
   }
+
+# not run
+# sc_signature_enrichment(seurat_object = combined_bal_minf50,
+#                         signature_upregulated = c("MARCO","LYZ") ,
+#                         signature_downregulated = NULL,
+#                         plot_type = "dim.reduction_plot",
+#                         reduction_use = "umap")
+# 
+# sc_signature_enrichment(seurat_object = combined_bal_minf50,
+#                         signature_upregulated = c("MARCO","LYZ") ,
+#                         signature_downregulated = NULL,
+#                         plot_type = "box_plot")
+# 
+# sc_signature_enrichment(seurat_object = combined_bal_minf50,
+#                         signature_upregulated = c("MARCO","LYZ") ,
+#                         signature_downregulated = NULL,
+#                         plot_type = "violin_plot")
+# 
+# sc_signature_enrichment(seurat_object = combined_bal_minf50,
+#                         signature_upregulated = c("MARCO","LYZ") ,
+#                         signature_downregulated = NULL,
+#                         plot_type = "ridges_plot")
+
+
+
